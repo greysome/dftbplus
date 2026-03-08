@@ -75,6 +75,7 @@ module dftbp_dftbplus_inputdata
 
     !> Number of processor groups
     integer :: nGroup
+    integer :: nGroupPostScc = 0
 
     !> Blacs options
     type(TBlacsOpts) :: blacsOpts

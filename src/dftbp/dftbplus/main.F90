@@ -15,6 +15,9 @@ module dftbp_dftbplus_main
   use dftbp_common_environment, only : globalTimers, TEnvironment
   use dftbp_common_file, only : closeFile, openFile, TFileDescr
   use dftbp_common_globalenv, only : stdOut, withMpi
+#:if WITH_MPI
+  use dftbp_common_mpienv, only : TMpiEnv
+#:endif
   use dftbp_common_hamiltoniantypes, only : hamiltonianTypes
   use dftbp_common_status, only : TStatus
   use dftbp_derivs_numderivs2, only : dipoleAdd, getHessianMatrix, next, polAdd, TNumderivs
@@ -1156,6 +1159,9 @@ contains
 
     integer :: iKS, iConstrIter, nConstrIter
     logical :: isFirstDet
+#:if WITH_MPI
+    type(TMpiEnv) :: savedMpi
+#:endif
 
     if (this%tDipole) allocate(dipoleTmp(3))
     isFirstDet = this%deltaDftb%iDeterminant == 1
@@ -1702,6 +1708,12 @@ contains
       end block
     end if
 
+  #:if WITH_MPI
+    if (env%mpiPostSccInitialised) then
+      savedMpi = env%mpi ; env%mpi = env%mpiPostScc
+    end if
+  #:endif
+
     call env%globalTimer%startTimer(globalTimers%postSCC)
 
     if (this%isLinResp) then
@@ -1865,6 +1877,10 @@ contains
       call this%electrostatPot%evaluate(env, this%scc, this%eField)
       call writeEsp(this%electrostatPot, env, iGeoStep, this%nGeoSteps)
     end if
+
+  #:if WITH_MPI
+    if (env%mpiPostSccInitialised) env%mpi = savedMpi
+  #:endif
 
   end subroutine processGeometry
 

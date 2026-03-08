@@ -1409,6 +1409,8 @@ contains
 
   #:if WITH_MPI
     call env%initMpi(input%ctrl%parallelOpts%nGroup)
+    call env%initMpiPostScc(merge(input%ctrl%parallelOpts%nGroupPostScc,&
+        & input%ctrl%parallelOpts%nGroup, input%ctrl%parallelOpts%nGroupPostScc /= 0))
   #:endif
 
     call initGeometry_(env, input, this%nAtom, this%nType, this%tPeriodic, this%tHelical,&

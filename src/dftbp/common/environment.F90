@@ -47,13 +47,10 @@ module dftbp_common_environment
     type(TTimerArray), public, allocatable :: globalTimer
 
   #:if WITH_MPI
-
-    !> Global mpi settings
     type(TMpiEnv), public :: mpi
-
-    !> Whether MPI environment had been initialised
+    type(TMpiEnv), public :: mpiPostScc
     logical :: mpiInitialised = .false.
-
+    logical, public :: mpiPostSccInitialised = .false.
   #:endif
 
   #:if WITH_SCALAPACK
@@ -80,6 +77,7 @@ module dftbp_common_environment
 
   #:if WITH_MPI
     procedure :: initMpi => TEnvironment_initMpi
+    procedure :: initMpiPostScc => TEnvironment_initMpiPostScc
   #:endif
 
   #:if WITH_SCALAPACK
@@ -203,6 +201,10 @@ contains
     #:endif
 
     #:if WITH_MPI
+      if (this%mpiPostSccInitialised) then
+        call TMpiEnv_final(this%mpiPostScc)
+        this%mpiPostSccInitialised = .false.
+      end if
       if (this%mpiInitialised) then
         call TMpiEnv_final(this%mpi)
         this%mpiInitialised = .false.
@@ -271,6 +273,14 @@ contains
     this%mpiInitialised = .true.
 
   end subroutine TEnvironment_initMpi
+
+
+  subroutine TEnvironment_initMpiPostScc(this, nGroup)
+    class(TEnvironment), intent(inout) :: this
+    integer, intent(in) :: nGroup
+    call TMpiEnv_init(this%mpiPostScc, globalMpiComm=this%mpi%globalComm, nGroup=nGroup)
+    this%mpiPostSccInitialised = .true.
+  end subroutine TEnvironment_initMpiPostScc
 
 #:endif
 

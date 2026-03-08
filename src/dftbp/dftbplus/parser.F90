@@ -7703,6 +7703,7 @@ contains
       end if
       allocate(input%ctrl%parallelOpts)
       call getChildValue(node, "Groups", input%ctrl%parallelOpts%nGroup, 1, child=pTmp)
+      call getChildValue(node, "GroupsPostScc", input%ctrl%parallelOpts%nGroupPostScc, 0)
       call getChildValue(node, "UseOmpThreads", input%ctrl%parallelOpts%tOmpThreads, .not. withMpi)
       call readBlacs(node, input%ctrl%parallelOpts%blacsOpts)
     end if
