@@ -1,23 +1,18 @@
-From 1c134c06d78670c5ec7a3fdebab55ca5fd67c3cb Mon Sep 17 00:00:00 2001
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: Claude <noreply@anthropic.com>
 Date: Tue, 24 Feb 2026 14:54:55 +0000
-Subject: [PATCH] Add per-phase MPI groups and OpenMP thread config for
- diag/post-SCC
+Subject: [PATCH] Add GroupsPostScc: separate MPI group count for post-SCC phase
 
-Introduces three new keys under the Parallel {} HSD block:
+Introduces one new key under the Parallel {} HSD block:
 
-  GroupsPostScc    = N  ! MPI groups for post-SCC phase (default: same as Groups)
-  OmpThreadsDiag   = N  ! OMP threads during diagonalisation (default: no change)
-  OmpThreadsPostScc= N  ! OMP threads during post-SCC processing (default: no change)
+  GroupsPostScc = N  ! MPI groups for post-SCC phase (default: same as Groups)
 
-TParallelOpts gains the three corresponding integer fields.  TEnvironment
-gains a second TMpiEnv (mpiPostScc) and TBlacsEnv (blacsPostScc), each
-initialised from the same globalComm but with the post-SCC nGroup value.
-At the start of post-SCC processing the live env%mpi / env%blacs members
-are replaced with their post-SCC counterparts so all downstream routines
-automatically pick up the new layout.  At the diagonalisation entry and
-post-SCC entry the OMP thread count is updated via omp_set_num_threads
-when non-zero values are supplied.
+TParallelOpts gains nGroupPostScc.  TEnvironment gains a second TMpiEnv
+(mpiPostScc) and TBlacsEnv (blacsPostScc), each initialised from the same
+globalComm but with the post-SCC nGroup value.  At the start of post-SCC
+processing the live env%mpi / env%blacs members are replaced with their
+post-SCC counterparts so all downstream routines automatically pick up the
+new layout.
 
 Patch applies against 8f95b9b3 (release-24.1).  Apply with:
 
@@ -25,23 +20,19 @@ Patch applies against 8f95b9b3 (release-24.1).  Apply with:
 
 https://claude.ai/code/session_01EpL8g7FBYmjnGa8AEY96WJ
 ---
- src/dftbp/common/environment.F90   | 77 +++++++++++++++++++++++++++++-
- src/dftbp/dftbplus/initprogram.F90 | 51 ++++++++++++++++++++
- src/dftbp/dftbplus/inputdata.F90   | 11 ++++-
- src/dftbp/dftbplus/main.F90        | 22 +++++++++
- src/dftbp/dftbplus/parser.F90      |  3 ++
- 5 files changed, 161 insertions(+), 3 deletions(-)
+ src/dftbp/common/environment.F90   | 83 ++++++++++++++++++++++++++++++
+ src/dftbp/dftbplus/initprogram.F90 | 54 +++++++++++++++++++
+ src/dftbp/dftbplus/inputdata.F90   |  4 ++
+ src/dftbp/dftbplus/main.F90        | 11 ++++
+ src/dftbp/dftbplus/parser.F90      |  1 +
+ 5 files changed, 153 insertions(+)
 
 diff --git a/src/dftbp/common/environment.F90 b/src/dftbp/common/environment.F90
-index 096d5ddc..79e3898f 100644
+index 028baa2a..470058d8 100644
 --- a/src/dftbp/common/environment.F90
 +++ b/src/dftbp/common/environment.F90
-@@ -48,23 +48,41 @@ module dftbp_common_environment
- 
-   #:if WITH_MPI
- 
--    !> Global mpi settings
-+    !> MPI settings for diagonalisation phase
+@@ -51,9 +51,15 @@ module dftbp_common_environment
+     !> Global mpi settings
      type(TMpiEnv), public :: mpi
  
 +    !> MPI settings for post-SCC phase (different nGroup, same globalComm)
@@ -56,9 +47,8 @@ index 096d5ddc..79e3898f 100644
    #:endif
  
    #:if WITH_SCALAPACK
- 
--    !> Global scalapack settings
-+    !> BLACS grid for diagonalisation phase
+@@ -61,8 +67,14 @@ module dftbp_common_environment
+     !> Global scalapack settings
      type(TBlacsEnv), public :: blacs
  
 +    !> BLACS grid for post-SCC phase
@@ -71,16 +61,8 @@ index 096d5ddc..79e3898f 100644
 +    logical, public :: blacsPostSccInitialised = .false.
    #:endif
  
-+    !> OpenMP threads to set at the start of diagonalisation (0 = no change)
-+    integer, public :: nOmpThreadsDiag = 0
-+
-+    !> OpenMP threads to set at the start of post-SCC processing (0 = no change)
-+    integer, public :: nOmpThreadsPostScc = 0
-+
    #:if WITH_MAGMA
-     !> Global GPU settings
-     type(TGpuEnv), public :: gpu
-@@ -80,10 +98,12 @@ module dftbp_common_environment
+@@ -80,10 +92,12 @@ module dftbp_common_environment
  
    #:if WITH_MPI
      procedure :: initMpi => TEnvironment_initMpi
@@ -93,7 +75,7 @@ index 096d5ddc..79e3898f 100644
    #:endif
  
    #:if WITH_MAGMA
-@@ -176,6 +196,10 @@ contains
+@@ -196,6 +210,10 @@ contains
      end if
  
      #:if WITH_SCALAPACK
@@ -104,7 +86,7 @@ index 096d5ddc..79e3898f 100644
        if (this%blacsInitialised) then
          call TBlacsEnv_final(this%blacs)
          this%blacsInitialised = .false.
-@@ -183,6 +207,10 @@ contains
+@@ -203,6 +221,10 @@ contains
      #:endif
  
      #:if WITH_MPI
@@ -115,13 +97,12 @@ index 096d5ddc..79e3898f 100644
        if (this%mpiInitialised) then
          call TMpiEnv_final(this%mpi)
          this%mpiInitialised = .false.
-@@ -252,6 +280,22 @@ contains
+@@ -272,6 +294,21 @@ contains
  
    end subroutine TEnvironment_initMpi
  
 +
 +  !> Initializes the post-SCC MPI environment with a (potentially different) group count.
-+  !> Re-uses the same globalComm; only groupComm and interGroupComm differ.
 +  subroutine TEnvironment_initMpiPostScc(this, nGroup)
 +
 +    !> Instance
@@ -138,7 +119,7 @@ index 096d5ddc..79e3898f 100644
  #:endif
  
  
-@@ -284,6 +328,35 @@ contains
+@@ -304,6 +341,35 @@ contains
  
    end subroutine TEnvironment_initBlacs
  
@@ -175,14 +156,13 @@ index 096d5ddc..79e3898f 100644
  
  
 diff --git a/src/dftbp/dftbplus/initprogram.F90 b/src/dftbp/dftbplus/initprogram.F90
-index 5c662bd2..5d970f9b 100644
+index a18f55fe..db103fcb 100644
 --- a/src/dftbp/dftbplus/initprogram.F90
 +++ b/src/dftbp/dftbplus/initprogram.F90
-@@ -1453,8 +1453,17 @@ contains
-     end if
+@@ -1409,6 +1409,12 @@ contains
  
+   #:if WITH_MPI
      call env%initMpi(input%ctrl%parallelOpts%nGroup)
-+
 +    block
 +      integer :: nGroupPostScc
 +      nGroupPostScc = input%ctrl%parallelOpts%nGroupPostScc
@@ -191,12 +171,8 @@ index 5c662bd2..5d970f9b 100644
 +    end block
    #:endif
  
-+  env%nOmpThreadsDiag    = input%ctrl%parallelOpts%nOmpThreadsDiag
-+  env%nOmpThreadsPostScc = input%ctrl%parallelOpts%nOmpThreadsPostScc
- 
-   #:if WITH_SCALAPACK
-     call initBlacs(input%ctrl%parallelOpts%blacsOpts, this%nAtom, this%nOrb,&
-@@ -1465,6 +1474,14 @@ contains
+     call initGeometry_(env, input, this%nAtom, this%nType, this%tPeriodic, this%tHelical,&
+@@ -1561,6 +1567,14 @@ contains
        end if
        call error(errStatus%message)
      end if
@@ -209,16 +185,16 @@ index 5c662bd2..5d970f9b 100644
 +      call error(errStatus%message)
 +    end if
    #:endif
-     call TParallelKS_init(this%parallelKS, env, this%nKPoint, nIndepHam)
+     call TParallelKS_init(this%parallelKS, env, this%nKPoint, this%nIndepSpin)
  
-@@ -5128,6 +5145,40 @@ contains
+@@ -5638,6 +5652,40 @@ contains
    end subroutine initBlacs
  
  
-+  !> Initialises the post-SCC BLACS grid, which may use a different nGroup than the diag grid.
++  !> Initialises the post-SCC BLACS grid (same block sizes, post-SCC MPI layout).
 +  subroutine initBlacsPostScc(blacsOpts, nAtom, nOrb, t2Component, env, errStatus)
 +
-+    !> BLACS settings (same block size as diag grid)
++    !> BLACS settings
 +    type(TBlacsOpts), intent(in) :: blacsOpts
 +
 +    !> Number of atoms
@@ -250,54 +226,31 @@ index 5c662bd2..5d970f9b 100644
 +
 +
    !> Generate descriptions of large dense matrices in BLACS decomposition
-   !>
-   !> Note: It must be called after getDenseDescCommon() has been called.
+   !! Note: It must be called after getDenseDescCommon() has been called.
+   subroutine getDenseDescBlacs(env, rowBlock, colBlock, denseDesc, isSparseReorderRequired)
 diff --git a/src/dftbp/dftbplus/inputdata.F90 b/src/dftbp/dftbplus/inputdata.F90
-index 019e1d81..4b38f7b8 100644
+index 62f0a63b..deb4186c 100644
 --- a/src/dftbp/dftbplus/inputdata.F90
 +++ b/src/dftbp/dftbplus/inputdata.F90
-@@ -68,9 +68,18 @@ module dftbp_dftbplus_inputdata
-   !> Contains the parallel options
-   type :: TParallelOpts
- 
--    !> Number of processor groups
-+    !> Number of processor groups for diagonalisation
+@@ -76,6 +76,9 @@ module dftbp_dftbplus_inputdata
+     !> Number of processor groups
      integer :: nGroup
  
 +    !> Number of processor groups for post-SCC processing (0 = same as nGroup)
 +    integer :: nGroupPostScc = 0
 +
-+    !> OpenMP threads to use during diagonalisation (0 = no change)
-+    integer :: nOmpThreadsDiag = 0
-+
-+    !> OpenMP threads to use during post-SCC processing (0 = no change)
-+    integer :: nOmpThreadsPostScc = 0
-+
      !> Blacs options
      type(TBlacsOpts) :: blacsOpts
  
 diff --git a/src/dftbp/dftbplus/main.F90 b/src/dftbp/dftbplus/main.F90
-index bf972bb0..8161ff2c 100644
+index ef75bd7f..e7f589cd 100644
 --- a/src/dftbp/dftbplus/main.F90
 +++ b/src/dftbp/dftbplus/main.F90
-@@ -15,6 +15,9 @@ module dftbp_dftbplus_main
-   use dftbp_common_environment, only : TEnvironment, globalTimers
-   use dftbp_common_file, only : TFileDescr, openFile, closeFile
-   use dftbp_common_globalenv, only : stdOut, withMpi
-+#:if WITH_OMP
-+  use omp_lib, only : omp_set_num_threads
-+#:endif
-   use dftbp_common_hamiltoniantypes, only : hamiltonianTypes
-   use dftbp_common_status, only : TStatus
-   use dftbp_derivs_numderivs2, only : TNumderivs, next, getHessianMatrix, dipoleAdd, polAdd
-@@ -1472,6 +1475,22 @@ contains
+@@ -1702,6 +1702,17 @@ contains
        end block
      end if
  
 +  #:if WITH_MPI
-+    ! Swap to the post-SCC MPI environment so routines that use env%mpi%groupComm /
-+    ! env%mpi%interGroupComm see the post-SCC group layout.  env%mpi%globalComm is
-+    ! identical in both environments so global reductions are unaffected.
 +    if (env%mpiPostSccInitialised) then
 +      call move_alloc(env%mpi%groupMembersGlobal, env%mpiPostScc%groupMembersGlobal)
 +      call move_alloc(env%mpi%groupMembersWorld,  env%mpiPostScc%groupMembersWorld)
@@ -307,33 +260,19 @@ index bf972bb0..8161ff2c 100644
 +    if (env%blacsPostSccInitialised) env%blacs = env%blacsPostScc
 +  #:endif
 +  #:endif
-+  #:if WITH_OMP
-+    if (env%nOmpThreadsPostScc > 0) call omp_set_num_threads(env%nOmpThreadsPostScc)
-+  #:endif
++
      call env%globalTimer%startTimer(globalTimers%postSCC)
  
      if (this%isLinResp) then
-@@ -2844,6 +2863,9 @@ contains
-     integer :: nSpin
- 
-     nSpin = size(ints%hamiltonian, dim=2)
-+  #:if WITH_OMP
-+    if (env%nOmpThreadsDiag > 0) call omp_set_num_threads(env%nOmpThreadsDiag)
-+  #:endif
-     call env%globalTimer%startTimer(globalTimers%diagonalization)
-     if (nSpin /= 4) then
-       if (tRealHS) then
 diff --git a/src/dftbp/dftbplus/parser.F90 b/src/dftbp/dftbplus/parser.F90
-index 919a6cf3..2b8d7a5f 100644
+index 883465cf..5f189bee 100644
 --- a/src/dftbp/dftbplus/parser.F90
 +++ b/src/dftbp/dftbplus/parser.F90
-@@ -7543,6 +7543,9 @@ contains
+@@ -7703,6 +7703,7 @@ contains
        end if
        allocate(input%ctrl%parallelOpts)
        call getChildValue(node, "Groups", input%ctrl%parallelOpts%nGroup, 1, child=pTmp)
 +      call getChildValue(node, "GroupsPostScc", input%ctrl%parallelOpts%nGroupPostScc, 0)
-+      call getChildValue(node, "OmpThreadsDiag", input%ctrl%parallelOpts%nOmpThreadsDiag, 0)
-+      call getChildValue(node, "OmpThreadsPostScc", input%ctrl%parallelOpts%nOmpThreadsPostScc, 0)
        call getChildValue(node, "UseOmpThreads", input%ctrl%parallelOpts%tOmpThreads, .not. withMpi)
        call readBlacs(node, input%ctrl%parallelOpts%blacsOpts)
      end if
