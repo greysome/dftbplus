@@ -7,16 +7,12 @@ Introduces one new key under the Parallel {} HSD block:
 
   GroupsPostScc = N  ! MPI groups for post-SCC phase (default: same as Groups)
 
-TParallelOpts gains nGroupPostScc.  TEnvironment gains a second TMpiEnv
-(mpiPostScc) and TBlacsEnv (blacsPostScc), each initialised from the same
-globalComm but with the post-SCC nGroup value.
-
-At the start of post-SCC processing inside processGeometry, the live
-env%mpi / env%blacs are saved to local variables and replaced with their
-post-SCC counterparts so all downstream routines automatically pick up the
-new layout.  At the end of processGeometry the originals are restored, so
-that the next geometry step's SCC loop starts with the correct diag layout.
-This makes the swap safe for geometry optimisations and MD runs.
+TParallelOpts gains nGroupPostScc.  TEnvironment gains mpiPostScc /
+blacsPostScc (initialised once from the same globalComm with the post-SCC
+nGroup).  At the post-SCC boundary inside processGeometry, env%mpi and
+env%blacs are saved to local variables, replaced with the post-SCC
+counterparts, then restored at the end of the subroutine so that every
+geometry step's SCC loop starts with the correct diag layout.
 
 Patch applies against 8f95b9b3 (release-24.1).  Apply with:
 
@@ -25,41 +21,37 @@ Patch applies against 8f95b9b3 (release-24.1).  Apply with:
 https://claude.ai/code/session_01EpL8g7FBYmjnGa8AEY96WJ
 ---
 diff --git a/src/dftbp/common/environment.F90 b/src/dftbp/common/environment.F90
-index 028baa2a..470058d8 100644
+index 028baa2a..b98e1372 100644
 --- a/src/dftbp/common/environment.F90
 +++ b/src/dftbp/common/environment.F90
-@@ -51,9 +51,15 @@ module dftbp_common_environment
-     !> Global mpi settings
+@@ -47,22 +47,17 @@ module dftbp_common_environment
+     type(TTimerArray), public, allocatable :: globalTimer
+ 
+   #:if WITH_MPI
+-
+-    !> Global mpi settings
      type(TMpiEnv), public :: mpi
- 
-+    !> MPI settings for post-SCC phase (different nGroup, same globalComm)
+-
+-    !> Whether MPI environment had been initialised
 +    type(TMpiEnv), public :: mpiPostScc
-+
-     !> Whether MPI environment had been initialised
      logical :: mpiInitialised = .false.
- 
-+    !> Whether post-SCC MPI environment had been initialised
+-
 +    logical, public :: mpiPostSccInitialised = .false.
-+
    #:endif
  
    #:if WITH_SCALAPACK
-@@ -61,8 +67,14 @@ module dftbp_common_environment
-     !> Global scalapack settings
+-
+-    !> Global scalapack settings
      type(TBlacsEnv), public :: blacs
- 
-+    !> BLACS grid for post-SCC phase
+-
+-    !> Whether BLACS environment had been initialised
 +    type(TBlacsEnv), public :: blacsPostScc
-+
-     !> Whether BLACS environment had been initialised
      logical :: blacsInitialised = .false.
-+
-+    !> Whether post-SCC BLACS environment had been initialised
 +    logical, public :: blacsPostSccInitialised = .false.
    #:endif
  
    #:if WITH_MAGMA
-@@ -80,10 +92,12 @@ module dftbp_common_environment
+@@ -80,10 +75,12 @@ module dftbp_common_environment
  
    #:if WITH_MPI
      procedure :: initMpi => TEnvironment_initMpi
@@ -72,7 +64,7 @@ index 028baa2a..470058d8 100644
    #:endif
  
    #:if WITH_MAGMA
-@@ -196,6 +210,10 @@ contains
+@@ -196,6 +193,10 @@ contains
      end if
  
      #:if WITH_SCALAPACK
@@ -83,7 +75,7 @@ index 028baa2a..470058d8 100644
        if (this%blacsInitialised) then
          call TBlacsEnv_final(this%blacs)
          this%blacsInitialised = .false.
-@@ -203,6 +221,10 @@ contains
+@@ -203,6 +204,10 @@ contains
      #:endif
  
      #:if WITH_MPI
@@ -94,131 +86,82 @@ index 028baa2a..470058d8 100644
        if (this%mpiInitialised) then
          call TMpiEnv_final(this%mpi)
          this%mpiInitialised = .false.
-@@ -272,6 +294,21 @@ contains
+@@ -272,6 +277,14 @@ contains
  
    end subroutine TEnvironment_initMpi
  
 +
-+  !> Initializes the post-SCC MPI environment with a (potentially different) group count.
 +  subroutine TEnvironment_initMpiPostScc(this, nGroup)
-+
-+    !> Instance
 +    class(TEnvironment), intent(inout) :: this
-+
-+    !> Number of process groups for post-SCC phase
 +    integer, intent(in) :: nGroup
-+
 +    call TMpiEnv_init(this%mpiPostScc, globalMpiComm=this%mpi%globalComm, nGroup=nGroup)
 +    this%mpiPostSccInitialised = .true.
-+
 +  end subroutine TEnvironment_initMpiPostScc
 +
  #:endif
  
  
-@@ -304,6 +341,35 @@ contains
+@@ -304,6 +317,17 @@ contains
  
    end subroutine TEnvironment_initBlacs
  
 +
-+  !> Initializes the post-SCC BLACS environment using the post-SCC MPI communicators.
 +  subroutine TEnvironment_initBlacsPostScc(this, rowBlock, colBlock, nOrb, nAtom, errStatus)
-+
-+    !> Instance
 +    class(TEnvironment), intent(inout) :: this
-+
-+    !> Row block size
-+    integer, intent(in) :: rowBlock
-+
-+    !> Column block size
-+    integer, intent(in) :: colBlock
-+
-+    !> Nr. of orbitals
-+    integer, intent(in) :: nOrb
-+
-+    !> Nr. of atoms
-+    integer, intent(in) :: nAtom
-+
-+    !> Operation status, if an error needs to be returned
++    integer, intent(in) :: rowBlock, colBlock, nOrb, nAtom
 +    type(TStatus), intent(inout) :: errStatus
-+
 +    call TBlacsEnv_init(this%blacsPostScc, this%mpiPostScc, rowBlock, colBlock, nOrb, nAtom,&
 +        & errStatus)
 +    @:PROPAGATE_ERROR(errStatus)
 +    this%blacsPostSccInitialised = .true.
-+
 +  end subroutine TEnvironment_initBlacsPostScc
 +
  #:endif
  
  
 diff --git a/src/dftbp/dftbplus/initprogram.F90 b/src/dftbp/dftbplus/initprogram.F90
-index a18f55fe..db103fcb 100644
+index a18f55fe..832476eb 100644
 --- a/src/dftbp/dftbplus/initprogram.F90
 +++ b/src/dftbp/dftbplus/initprogram.F90
-@@ -1409,6 +1409,12 @@ contains
+@@ -1409,6 +1409,8 @@ contains
  
    #:if WITH_MPI
      call env%initMpi(input%ctrl%parallelOpts%nGroup)
-+    block
-+      integer :: nGroupPostScc
-+      nGroupPostScc = input%ctrl%parallelOpts%nGroupPostScc
-+      if (nGroupPostScc == 0) nGroupPostScc = input%ctrl%parallelOpts%nGroup
-+      call env%initMpiPostScc(nGroupPostScc)
-+    end block
++    call env%initMpiPostScc(merge(input%ctrl%parallelOpts%nGroupPostScc,&
++        & input%ctrl%parallelOpts%nGroup, input%ctrl%parallelOpts%nGroupPostScc /= 0))
    #:endif
  
      call initGeometry_(env, input, this%nAtom, this%nType, this%tPeriodic, this%tHelical,&
-@@ -1561,6 +1567,14 @@ contains
-       end if
-       call error(errStatus%message)
-     end if
+@@ -1556,9 +1558,13 @@ contains
+     call initBlacs(input%ctrl%parallelOpts%blacsOpts, this%nAtom, this%nOrb, this%t2Component, env,&
+         & errStatus)
+     if (errStatus%hasError()) then
+-      if (errStatus%code == -1) then
+-        call warning("Insufficient atoms for this number of MPI processors")
+-      end if
++      if (errStatus%code == -1) call warning("Insufficient atoms for this number of MPI processors")
++      call error(errStatus%message)
++    end if
 +    call initBlacsPostScc(input%ctrl%parallelOpts%blacsOpts, this%nAtom, this%nOrb,&
 +        & this%t2Component, env, errStatus)
 +    if (errStatus%hasError()) then
-+      if (errStatus%code == -1) then
-+        call warning("Insufficient atoms for this number of MPI processors (post-SCC grid)")
-+      end if
-+      call error(errStatus%message)
-+    end if
++      if (errStatus%code == -1) call warning("Insufficient atoms for post-SCC MPI processors")
+       call error(errStatus%message)
+     end if
    #:endif
-     call TParallelKS_init(this%parallelKS, env, this%nKPoint, this%nIndepSpin)
- 
-@@ -5638,6 +5652,40 @@ contains
+@@ -5638,6 +5644,18 @@ contains
    end subroutine initBlacs
  
  
-+  !> Initialises the post-SCC BLACS grid (same block sizes, post-SCC MPI layout).
 +  subroutine initBlacsPostScc(blacsOpts, nAtom, nOrb, t2Component, env, errStatus)
-+
-+    !> BLACS settings
 +    type(TBlacsOpts), intent(in) :: blacsOpts
-+
-+    !> Number of atoms
-+    integer, intent(in) :: nAtom
-+
-+    !> Number of orbitals
-+    integer, intent(in) :: nOrb
-+
-+    !> Is this a two component calculation
++    integer, intent(in) :: nAtom, nOrb
 +    logical, intent(in) :: t2Component
-+
-+    !> Computing environment data
 +    type(TEnvironment), intent(inout) :: env
-+
-+    !> Operation status, if an error needs to be returned
 +    type(TStatus), intent(inout) :: errStatus
-+
-+    integer :: sizeHS
-+
-+    if (t2Component) then
-+      sizeHS = 2 * nOrb
-+    else
-+      sizeHS = nOrb
-+    end if
-+    call env%initBlacsPostScc(blacsOpts%blockSize, blacsOpts%blockSize, sizeHS, nAtom, errStatus)
++    call env%initBlacsPostScc(blacsOpts%blockSize, blacsOpts%blockSize,&
++        & merge(2*nOrb, nOrb, t2Component), nAtom, errStatus)
 +    @:PROPAGATE_ERROR(errStatus)
-+
 +  end subroutine initBlacsPostScc
 +
 +
@@ -226,21 +169,19 @@ index a18f55fe..db103fcb 100644
    !! Note: It must be called after getDenseDescCommon() has been called.
    subroutine getDenseDescBlacs(env, rowBlock, colBlock, denseDesc, isSparseReorderRequired)
 diff --git a/src/dftbp/dftbplus/inputdata.F90 b/src/dftbp/dftbplus/inputdata.F90
-index 62f0a63b..deb4186c 100644
+index 62f0a63b..e1133a5d 100644
 --- a/src/dftbp/dftbplus/inputdata.F90
 +++ b/src/dftbp/dftbplus/inputdata.F90
-@@ -76,6 +76,9 @@ module dftbp_dftbplus_inputdata
+@@ -75,6 +75,7 @@ module dftbp_dftbplus_inputdata
+ 
      !> Number of processor groups
      integer :: nGroup
- 
-+    !> Number of processor groups for post-SCC processing (0 = same as nGroup)
 +    integer :: nGroupPostScc = 0
-+
+ 
      !> Blacs options
      type(TBlacsOpts) :: blacsOpts
- 
 diff --git a/src/dftbp/dftbplus/main.F90 b/src/dftbp/dftbplus/main.F90
-index ef75bd7f..e4ecd37a 100644
+index ef75bd7f..2921927f 100644
 --- a/src/dftbp/dftbplus/main.F90
 +++ b/src/dftbp/dftbplus/main.F90
 @@ -15,6 +15,12 @@ module dftbp_dftbplus_main
@@ -269,19 +210,17 @@ index ef75bd7f..e4ecd37a 100644
  
      if (this%tDipole) allocate(dipoleTmp(3))
      isFirstDet = this%deltaDftb%iDeterminant == 1
-@@ -1702,6 +1714,19 @@ contains
+@@ -1702,6 +1714,17 @@ contains
        end block
      end if
  
 +  #:if WITH_MPI
 +    if (env%mpiPostSccInitialised) then
-+      savedMpi = env%mpi
-+      env%mpi  = env%mpiPostScc
++      savedMpi = env%mpi ; env%mpi = env%mpiPostScc
 +    end if
 +  #:if WITH_SCALAPACK
 +    if (env%blacsPostSccInitialised) then
-+      savedBlacs = env%blacs
-+      env%blacs  = env%blacsPostScc
++      savedBlacs = env%blacs ; env%blacs = env%blacsPostScc
 +    end if
 +  #:endif
 +  #:endif
@@ -289,7 +228,7 @@ index ef75bd7f..e4ecd37a 100644
      call env%globalTimer%startTimer(globalTimers%postSCC)
  
      if (this%isLinResp) then
-@@ -1866,6 +1891,13 @@ contains
+@@ -1866,6 +1889,13 @@ contains
        call writeEsp(this%electrostatPot, env, iGeoStep, this%nGeoSteps)
      end if
  
