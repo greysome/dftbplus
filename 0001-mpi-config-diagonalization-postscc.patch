@@ -51,7 +51,7 @@ index 096d5ddc..79e3898f 100644
      logical :: mpiInitialised = .false.
  
 +    !> Whether post-SCC MPI environment had been initialised
-+    logical :: mpiPostSccInitialised = .false.
++    logical, public :: mpiPostSccInitialised = .false.
 +
    #:endif
  
@@ -68,7 +68,7 @@ index 096d5ddc..79e3898f 100644
      logical :: blacsInitialised = .false.
 +
 +    !> Whether post-SCC BLACS environment had been initialised
-+    logical :: blacsPostSccInitialised = .false.
++    logical, public :: blacsPostSccInitialised = .false.
    #:endif
  
 +    !> OpenMP threads to set at the start of diagonalisation (0 = no change)
