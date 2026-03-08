@@ -9,10 +9,14 @@ Introduces one new key under the Parallel {} HSD block:
 
 TParallelOpts gains nGroupPostScc.  TEnvironment gains a second TMpiEnv
 (mpiPostScc) and TBlacsEnv (blacsPostScc), each initialised from the same
-globalComm but with the post-SCC nGroup value.  At the start of post-SCC
-processing the live env%mpi / env%blacs members are replaced with their
+globalComm but with the post-SCC nGroup value.
+
+At the start of post-SCC processing inside processGeometry, the live
+env%mpi / env%blacs are saved to local variables and replaced with their
 post-SCC counterparts so all downstream routines automatically pick up the
-new layout.
+new layout.  At the end of processGeometry the originals are restored, so
+that the next geometry step's SCC loop starts with the correct diag layout.
+This makes the swap safe for geometry optimisations and MD runs.
 
 Patch applies against 8f95b9b3 (release-24.1).  Apply with:
 
@@ -20,13 +24,6 @@ Patch applies against 8f95b9b3 (release-24.1).  Apply with:
 
 https://claude.ai/code/session_01EpL8g7FBYmjnGa8AEY96WJ
 ---
- src/dftbp/common/environment.F90   | 83 ++++++++++++++++++++++++++++++
- src/dftbp/dftbplus/initprogram.F90 | 54 +++++++++++++++++++
- src/dftbp/dftbplus/inputdata.F90   |  4 ++
- src/dftbp/dftbplus/main.F90        | 11 ++++
- src/dftbp/dftbplus/parser.F90      |  1 +
- 5 files changed, 153 insertions(+)
-
 diff --git a/src/dftbp/common/environment.F90 b/src/dftbp/common/environment.F90
 index 028baa2a..470058d8 100644
 --- a/src/dftbp/common/environment.F90
@@ -243,27 +240,69 @@ index 62f0a63b..deb4186c 100644
      type(TBlacsOpts) :: blacsOpts
  
 diff --git a/src/dftbp/dftbplus/main.F90 b/src/dftbp/dftbplus/main.F90
-index ef75bd7f..e7f589cd 100644
+index ef75bd7f..e4ecd37a 100644
 --- a/src/dftbp/dftbplus/main.F90
 +++ b/src/dftbp/dftbplus/main.F90
-@@ -1702,6 +1702,17 @@ contains
+@@ -15,6 +15,12 @@ module dftbp_dftbplus_main
+   use dftbp_common_environment, only : globalTimers, TEnvironment
+   use dftbp_common_file, only : closeFile, openFile, TFileDescr
+   use dftbp_common_globalenv, only : stdOut, withMpi
++#:if WITH_MPI
++  use dftbp_common_mpienv, only : TMpiEnv
++#:endif
++#:if WITH_SCALAPACK
++  use dftbp_common_blacsenv, only : TBlacsEnv
++#:endif
+   use dftbp_common_hamiltoniantypes, only : hamiltonianTypes
+   use dftbp_common_status, only : TStatus
+   use dftbp_derivs_numderivs2, only : dipoleAdd, getHessianMatrix, next, polAdd, TNumderivs
+@@ -1156,6 +1162,12 @@ contains
+ 
+     integer :: iKS, iConstrIter, nConstrIter
+     logical :: isFirstDet
++#:if WITH_MPI
++    type(TMpiEnv) :: savedMpi
++#:endif
++#:if WITH_SCALAPACK
++    type(TBlacsEnv) :: savedBlacs
++#:endif
+ 
+     if (this%tDipole) allocate(dipoleTmp(3))
+     isFirstDet = this%deltaDftb%iDeterminant == 1
+@@ -1702,6 +1714,19 @@ contains
        end block
      end if
  
 +  #:if WITH_MPI
 +    if (env%mpiPostSccInitialised) then
-+      call move_alloc(env%mpi%groupMembersGlobal, env%mpiPostScc%groupMembersGlobal)
-+      call move_alloc(env%mpi%groupMembersWorld,  env%mpiPostScc%groupMembersWorld)
-+      env%mpi = env%mpiPostScc
++      savedMpi = env%mpi
++      env%mpi  = env%mpiPostScc
 +    end if
 +  #:if WITH_SCALAPACK
-+    if (env%blacsPostSccInitialised) env%blacs = env%blacsPostScc
++    if (env%blacsPostSccInitialised) then
++      savedBlacs = env%blacs
++      env%blacs  = env%blacsPostScc
++    end if
 +  #:endif
 +  #:endif
 +
      call env%globalTimer%startTimer(globalTimers%postSCC)
  
      if (this%isLinResp) then
+@@ -1866,6 +1891,13 @@ contains
+       call writeEsp(this%electrostatPot, env, iGeoStep, this%nGeoSteps)
+     end if
+ 
++  #:if WITH_MPI
++    if (env%mpiPostSccInitialised) env%mpi = savedMpi
++  #:if WITH_SCALAPACK
++    if (env%blacsPostSccInitialised) env%blacs = savedBlacs
++  #:endif
++  #:endif
++
+   end subroutine processGeometry
+ 
+ 
 diff --git a/src/dftbp/dftbplus/parser.F90 b/src/dftbp/dftbplus/parser.F90
 index 883465cf..5f189bee 100644
 --- a/src/dftbp/dftbplus/parser.F90
