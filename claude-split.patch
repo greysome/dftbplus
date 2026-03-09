@@ -1,5 +1,5 @@
 diff --git a/src/dftbp/common/environment.F90 b/src/dftbp/common/environment.F90
-index 028baa2a..1c8e5a06 100644
+index 096d5ddc..97365b4f 100644
 --- a/src/dftbp/common/environment.F90
 +++ b/src/dftbp/common/environment.F90
 @@ -47,13 +47,10 @@ module dftbp_common_environment
@@ -26,7 +26,7 @@ index 028baa2a..1c8e5a06 100644
    #:endif
  
    #:if WITH_SCALAPACK
-@@ -203,6 +201,10 @@ contains
+@@ -183,6 +181,10 @@ contains
      #:endif
  
      #:if WITH_MPI
@@ -37,7 +37,7 @@ index 028baa2a..1c8e5a06 100644
        if (this%mpiInitialised) then
          call TMpiEnv_final(this%mpi)
          this%mpiInitialised = .false.
-@@ -272,6 +274,14 @@ contains
+@@ -252,6 +254,14 @@ contains
  
    end subroutine TEnvironment_initMpi
  
@@ -53,23 +53,23 @@ index 028baa2a..1c8e5a06 100644
  
  
 diff --git a/src/dftbp/dftbplus/initprogram.F90 b/src/dftbp/dftbplus/initprogram.F90
-index a18f55fe..5324f0a8 100644
+index 5c662bd2..425f986c 100644
 --- a/src/dftbp/dftbplus/initprogram.F90
 +++ b/src/dftbp/dftbplus/initprogram.F90
-@@ -1409,6 +1409,8 @@ contains
+@@ -1453,6 +1453,8 @@ contains
+     end if
  
-   #:if WITH_MPI
      call env%initMpi(input%ctrl%parallelOpts%nGroup)
 +    call env%initMpiPostScc(merge(input%ctrl%parallelOpts%nGroupPostScc,&
 +        & input%ctrl%parallelOpts%nGroup, input%ctrl%parallelOpts%nGroupPostScc /= 0))
    #:endif
  
-     call initGeometry_(env, input, this%nAtom, this%nType, this%tPeriodic, this%tHelical,&
+ 
 diff --git a/src/dftbp/dftbplus/inputdata.F90 b/src/dftbp/dftbplus/inputdata.F90
-index 62f0a63b..e1133a5d 100644
+index 019e1d81..961600b4 100644
 --- a/src/dftbp/dftbplus/inputdata.F90
 +++ b/src/dftbp/dftbplus/inputdata.F90
-@@ -75,6 +75,7 @@ module dftbp_dftbplus_inputdata
+@@ -70,6 +70,7 @@ module dftbp_dftbplus_inputdata
  
      !> Number of processor groups
      integer :: nGroup
@@ -78,30 +78,30 @@ index 62f0a63b..e1133a5d 100644
      !> Blacs options
      type(TBlacsOpts) :: blacsOpts
 diff --git a/src/dftbp/dftbplus/main.F90 b/src/dftbp/dftbplus/main.F90
-index ef75bd7f..fa22b0e1 100644
+index bf972bb0..2d3cfc27 100644
 --- a/src/dftbp/dftbplus/main.F90
 +++ b/src/dftbp/dftbplus/main.F90
 @@ -15,6 +15,9 @@ module dftbp_dftbplus_main
-   use dftbp_common_environment, only : globalTimers, TEnvironment
-   use dftbp_common_file, only : closeFile, openFile, TFileDescr
+   use dftbp_common_environment, only : TEnvironment, globalTimers
+   use dftbp_common_file, only : TFileDescr, openFile, closeFile
    use dftbp_common_globalenv, only : stdOut, withMpi
 +#:if WITH_MPI
 +  use dftbp_common_mpienv, only : TMpiEnv
 +#:endif
    use dftbp_common_hamiltoniantypes, only : hamiltonianTypes
    use dftbp_common_status, only : TStatus
-   use dftbp_derivs_numderivs2, only : dipoleAdd, getHessianMatrix, next, polAdd, TNumderivs
-@@ -1156,6 +1159,9 @@ contains
+   use dftbp_derivs_numderivs2, only : TNumderivs, next, getHessianMatrix, dipoleAdd, polAdd
+@@ -1010,6 +1013,9 @@ contains
+     logical :: constrConverged
  
-     integer :: iKS, iConstrIter, nConstrIter
-     logical :: isFirstDet
+     integer :: iSpin, iKS, iConstrIter, nConstrIter
 +#:if WITH_MPI
 +    type(TMpiEnv) :: savedMpi
 +#:endif
  
      if (this%tDipole) allocate(dipoleTmp(3))
-     isFirstDet = this%deltaDftb%iDeterminant == 1
-@@ -1702,6 +1708,12 @@ contains
+ 
+@@ -1472,6 +1478,12 @@ contains
        end block
      end if
  
@@ -114,7 +114,7 @@ index ef75bd7f..fa22b0e1 100644
      call env%globalTimer%startTimer(globalTimers%postSCC)
  
      if (this%isLinResp) then
-@@ -1866,6 +1878,10 @@ contains
+@@ -1619,6 +1631,10 @@ contains
        call writeEsp(this%electrostatPot, env, iGeoStep, this%nGeoSteps)
      end if
  
@@ -126,10 +126,10 @@ index ef75bd7f..fa22b0e1 100644
  
  
 diff --git a/src/dftbp/dftbplus/parser.F90 b/src/dftbp/dftbplus/parser.F90
-index 883465cf..5f189bee 100644
+index 919a6cf3..db6fed91 100644
 --- a/src/dftbp/dftbplus/parser.F90
 +++ b/src/dftbp/dftbplus/parser.F90
-@@ -7703,6 +7703,7 @@ contains
+@@ -7543,6 +7543,7 @@ contains
        end if
        allocate(input%ctrl%parallelOpts)
        call getChildValue(node, "Groups", input%ctrl%parallelOpts%nGroup, 1, child=pTmp)
