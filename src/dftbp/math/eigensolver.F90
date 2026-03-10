@@ -1131,11 +1131,11 @@ contains
 #:endfor
 
 
-#:for TYPE, KIND, SUFFIX, MAGMA_ROUTINE in &
-    & [("real", "rsp", "real", "magmaf_ssygvd_m"),&
-    &  ("real", "rdp", "dreal", "magmaf_dsygvd_m"),&
-    &  ("complex", "rsp", "complex", "magmaf_chegvd_m"),&
-    &  ("complex", "rdp", "dcomplex", "magmaf_zhegvd_m")]
+#:for TYPE, KIND, SUFFIX, MAGMA_SINGLE, MAGMA_MULTI in &
+    & [("real", "rsp", "real", "magmaf_ssygvd", "magmaf_ssygvd_m"),&
+    &  ("real", "rdp", "dreal", "magmaf_dsygvd", "magmaf_dsygvd_m"),&
+    &  ("complex", "rsp", "complex", "magmaf_chegvd", "magmaf_chegvd_m"),&
+    &  ("complex", "rdp", "dcomplex", "magmaf_zhegvd", "magmaf_zhegvd_m")]
 
   !> Generalised eigensolution for symmetric/hermitian matrices on GPU(s)
   subroutine magmaHegvd_${SUFFIX}$(ngpus, a, b, w, uplo, jobz, itype, info)
@@ -1196,11 +1196,21 @@ contains
     errorGuard: block
       iStep = 1
     #:if TYPE == "real"
-      call ${MAGMA_ROUTINE}$(ngpus, iitype, jobz, uplo, n, a, n, b, n, w, workDummy, -1,&
-          & iworkDummy, -1, info_)
+      if (ngpus == 1) then
+        call ${MAGMA_SINGLE}$(iitype, jobz, uplo, n, a, n, b, n, w, workDummy, -1,&
+            & iworkDummy, -1, info_)
+      else
+        call ${MAGMA_MULTI}$(ngpus, iitype, jobz, uplo, n, a, n, b, n, w, workDummy, -1,&
+            & iworkDummy, -1, info_)
+      end if
     #:else
-      call ${MAGMA_ROUTINE}$(ngpus, iitype, jobz, uplo, n, a, n, b, n, w, workDummy, -1,&
-          & rworkDummy, -1, iworkDummy, -1, info_)
+      if (ngpus == 1) then
+        call ${MAGMA_SINGLE}$(iitype, jobz, uplo, n, a, n, b, n, w, workDummy, -1,&
+            & rworkDummy, -1, iworkDummy, -1, info_)
+      else
+        call ${MAGMA_MULTI}$(ngpus, iitype, jobz, uplo, n, a, n, b, n, w, workDummy, -1,&
+            & rworkDummy, -1, iworkDummy, -1, info_)
+      end if
     #:endif
       if (info_ /= 0) exit errorGuard
 
@@ -1210,13 +1220,23 @@ contains
       iworkSize = iworkDummy(1)
       allocate(iwork(iworkSize))
     #:if TYPE == "real"
-      call ${MAGMA_ROUTINE}$(ngpus, iitype, jobz, uplo, n, a, n, b, n, w, work, workSize, iwork,&
-          & iworkSize, info_)
+      if (ngpus == 1) then
+        call ${MAGMA_SINGLE}$(iitype, jobz, uplo, n, a, n, b, n, w, work, workSize, iwork,&
+            & iworkSize, info_)
+      else
+        call ${MAGMA_MULTI}$(ngpus, iitype, jobz, uplo, n, a, n, b, n, w, work, workSize, iwork,&
+            & iworkSize, info_)
+      end if
     #:else
       rworkSize = nint(rworkDummy(1))
       allocate(rwork(rworkSize))
-      call ${MAGMA_ROUTINE}$(ngpus, iitype, jobz, uplo, n, a, n, b, n, w, work, workSize, rwork,&
-          & rworkSize, iwork, iworkSize, info_)
+      if (ngpus == 1) then
+        call ${MAGMA_SINGLE}$(iitype, jobz, uplo, n, a, n, b, n, w, work, workSize, rwork,&
+            & rworkSize, iwork, iworkSize, info_)
+      else
+        call ${MAGMA_MULTI}$(ngpus, iitype, jobz, uplo, n, a, n, b, n, w, work, workSize, rwork,&
+            & rworkSize, iwork, iworkSize, info_)
+      end if
     #:endif
     end block errorGuard
 
@@ -1225,16 +1245,16 @@ contains
 
     select case (iStep)
     case (1)
-      errorMsg = "Failure in routine ${MAGMA_ROUTINE}$ to determine optimum workspace"
+      errorMsg = "Failure in routine ${MAGMA_SINGLE}$ to determine optimum workspace"
     case (2)
       if (info_ < 0) then
-        write(errorMsg, "(i0, a)") "Failure in diagonalisation routine ${MAGMA_ROUTINE}$, illegal&
+        write(errorMsg, "(i0, a)") "Failure in diagonalisation routine ${MAGMA_SINGLE}$, illegal&
           & argument at position ", -info_
       else if (info_ <= n) then
-        write(errorMsg, "(a, i0, a)") "Failure in diagonalisation routine ${MAGMA_ROUTINE}$, ",&
+        write(errorMsg, "(a, i0, a)") "Failure in diagonalisation routine ${MAGMA_SINGLE}$, ",&
           & info_, " off-diagonal elements did not converge to zero."
       else
-        write(errorMsg, "(a, i0, a)") "Failure in diagonalisation routine ${MAGMA_ROUTINE}$,&
+        write(errorMsg, "(a, i0, a)") "Failure in diagonalisation routine ${MAGMA_SINGLE}$,&
           & non-positive definite overlap, minor ", info_ - n, " responsible."
       end if
     end select

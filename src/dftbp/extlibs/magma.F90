@@ -12,7 +12,8 @@ module dftbp_extlibs_magma
   use, intrinsic :: iso_c_binding, only : c_int
 #:if WITH_MAGMA
   use magma, only : magmaf_cheevd_m, magmaf_chegvd_m, magmaf_dsyevd_m, magmaf_dsygvd_m,&
-      & magmaf_ssyevd_m, magmaf_ssygvd_m, magmaf_zheevd_m, magmaf_zhegvd_m
+      & magmaf_ssyevd_m, magmaf_ssygvd_m, magmaf_zheevd_m, magmaf_zhegvd_m,&
+      & magmaf_ssygvd, magmaf_dsygvd, magmaf_chegvd, magmaf_zhegvd
 #:endif
   implicit none
 
@@ -22,6 +23,7 @@ module dftbp_extlibs_magma
   public :: getGpusAvailable, getGpusRequested, gpusInit
   public :: magmaf_ssygvd_m, magmaf_dsygvd_m, magmaf_chegvd_m, magmaf_zhegvd_m
   public :: magmaf_ssyevd_m, magmaf_dsyevd_m, magmaf_cheevd_m, magmaf_zheevd_m
+  public :: magmaf_ssygvd, magmaf_dsygvd, magmaf_chegvd, magmaf_zhegvd
 #:endif
 
   !> Whether code was built with GPU support
