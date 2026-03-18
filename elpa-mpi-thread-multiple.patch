@@ -1,0 +1,52 @@
+From 0fd01af5ecd169b3a40032cf4ae663a4f0a471af Mon Sep 17 00:00:00 2001
+From: Claude <noreply@anthropic.com>
+Date: Wed, 18 Mar 2026 08:44:17 +0000
+Subject: [PATCH] globalenv: request MPI_THREAD_MULTIPLE when compiled with
+ OpenMP
+
+When WITH_OMP is set, ELPA-GPU requires at least MPI_THREAD_SERIALIZED
+to run OpenMP threads across MPI ranks and initialize cuBLAS correctly.
+The previous MPI_THREAD_FUNNELED caused ELPA to cap itself at 1 thread,
+leading to 'Cannot destroy cublas handle' / cublasDestroy errors.
+
+Request MPI_THREAD_MULTIPLE when WITH_OMP; keep MPI_THREAD_FUNNELED
+otherwise (no-op for non-OpenMP builds).
+
+https://claude.ai/code/session_01EpL8g7FBYmjnGa8AEY96WJ
+---
+ src/dftbp/common/globalenv.F90 | 11 +++++++++--
+ 1 file changed, 9 insertions(+), 2 deletions(-)
+
+diff --git a/src/dftbp/common/globalenv.F90 b/src/dftbp/common/globalenv.F90
+index 8cf47ccf..eddd7daa 100644
+--- a/src/dftbp/common/globalenv.F90
++++ b/src/dftbp/common/globalenv.F90
+@@ -18,8 +18,11 @@ module dftbp_common_globalenv
+   use, intrinsic :: iso_fortran_env, only : error_unit, output_unit
+ #:if WITH_MPI
+   use mpi, only : MPI_COMM_WORLD
+-  use dftbp_extlibs_mpifx, only : MPI_THREAD_FUNNELED, mpifx_abort, mpifx_barrier, mpifx_comm,&
+-      & mpifx_finalize, mpifx_init_thread
++  use dftbp_extlibs_mpifx, only : MPI_THREAD_FUNNELED,&
++  #:if WITH_OMP
++      & MPI_THREAD_MULTIPLE,&
++  #:endif
++      & mpifx_abort, mpifx_barrier, mpifx_comm, mpifx_finalize, mpifx_init_thread
+ #:endif
+   implicit none
+ 
+@@ -115,7 +118,11 @@ contains
+       doMpiFinalization = .false.
+     else
+       mpiComm0 = MPI_COMM_WORLD
++  #:if WITH_OMP
++      call mpifx_init_thread(requiredThreading=MPI_THREAD_MULTIPLE)
++  #:else
+       call mpifx_init_thread(requiredThreading=MPI_THREAD_FUNNELED)
++  #:endif
+     end if
+ 
+     call globalMpiComm%init(commid=mpiComm0)
+-- 
+2.43.0
+
