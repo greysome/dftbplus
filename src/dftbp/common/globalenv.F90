@@ -18,10 +18,7 @@ module dftbp_common_globalenv
   use, intrinsic :: iso_fortran_env, only : error_unit, output_unit
 #:if WITH_MPI
   use mpi, only : MPI_COMM_WORLD
-  use dftbp_extlibs_mpifx, only : MPI_THREAD_FUNNELED,&
-  #:if WITH_OMP
-      & MPI_THREAD_MULTIPLE,&
-  #:endif
+  use dftbp_extlibs_mpifx, only : MPI_THREAD_FUNNELED, MPI_THREAD_MULTIPLE,&
       & mpifx_abort, mpifx_barrier, mpifx_comm, mpifx_finalize, mpifx_init_thread
 #:endif
   implicit none
@@ -118,11 +115,7 @@ contains
       doMpiFinalization = .false.
     else
       mpiComm0 = MPI_COMM_WORLD
-  #:if WITH_OMP
       call mpifx_init_thread(requiredThreading=MPI_THREAD_MULTIPLE)
-  #:else
-      call mpifx_init_thread(requiredThreading=MPI_THREAD_FUNNELED)
-  #:endif
     end if
 
     call globalMpiComm%init(commid=mpiComm0)
